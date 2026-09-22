@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Visitor Counter API - a serverless HTTP service that tracks page visit counts.
+  This template owns the HTTP API (with gateway-managed CORS/preflight), the
+  Lambda Handler, the DynamoDB table, IAM, environment configuration, and
+  multi-environment (dev/prod) deploys.
+
+# -----------------------------------------------------------------------------
+# Parameters
+# -----------------------------------------------------------------------------
+# Stage drives per-Stage resource naming so dev and prod deploy as separate
+# CloudFormation stacks (and separate tables) in the same AWS account.
+#
+# AllowOrigin is the single per-Stage deploy-time value that feeds BOTH the HTTP
+# API's gateway-managed CORS configuration AND the Handler's ALLOW_ORIGIN
+# environment variable, so the gateway and the Handler always agree on the
+# allowed origin (Requirement 6.5). It defaults to "*" so the dev Stage works
+# out of the box; the prod Stage must supply an explicit origin at deploy time,
+# enforced via samconfig.toml (see task 6).
+Parameters:
+  Stage:
+    Type: String
+    Description: Deployment environment. Selects per-Stage resource names.
+    AllowedValues:
+      - dev
+      - prod
+
+  AllowOrigin:
+    Type: String
+    Description: >
+      CORS allowed origin. Feeds both the HTTP API CorsConfiguration and the
+      Handler's ALLOW_ORIGIN env var. Defaults to "*" for dev; prod must supply
+      an explicit origin (enforced via samconfig.toml).
+    Default: "*"
+
+# -----------------------------------------------------------------------------
+# Resources
+# -----------------------------------------------------------------------------
+Resources:
+  # HTTP API (payload format version 2.0). Owns CORS configuration and answers
+  # OPTIONS preflight at the edge without invoking the Handler (Requirements
+  # 11.1, 6.3). AllowOrigins is driven by the AllowOrigin parameter so the
+  # gateway and Handler agree on the allowed origin (Requirement 6.5).
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref AllowOrigin
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+
+  # The Handler Lambda function. Bundled by `sam build` via the esbuild
+  # BuildMethod into a self-contained artifact on the nodejs24.x runtime
+  # (Requirements 9.5). The GET and POST routes on the HTTP API are wired to
+  # this function; OPTIONS preflight is answered by the gateway and never
+  # reaches the Handler (Requirement 11.1).
+  #
+  # TABLE_NAME uses the per-Stage naming convention visitor-counter-${Stage};
+  # task 5.3 adds the matching stack-owned DynamoDB table and least-privilege
+  # IAM. ALLOW_ORIGIN comes from the same AllowOrigin parameter that drives the
+  # HTTP API CorsConfiguration, so the gateway and Handler agree (Requirement 6.5).
+  # The stack-owned DynamoDB table. Lifecycle-managed by this CloudFormation
+  # stack (Requirement 11.2). The partition key is `pageId` (String); it stores
+  # the Page_Id or the reserved Global_Counter key. TableName is pinned to the
+  # per-Stage convention visitor-counter-${Stage} so dev and prod use separate
+  # tables (Requirement 11.3) and so the name agrees with the Handler's
+  # TABLE_NAME environment variable and the DynamoDBCrudPolicy scope below.
+  CounterTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: !Sub "visitor-counter-${Stage}"
+      PrimaryKey:
+        Name: pageId
+        Type: String
+
+  CounterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # CodeUri points at the project root so the SAM esbuild BuildMethod finds
+      # the root package.json (to resolve/bundle runtime dependencies such as
+      # @aws-sdk/client-dynamodb) and the esbuild binary in the root
+      # node_modules. The EntryPoints below select src/index.ts relative to
+      # this CodeUri; esbuild tree-shakes the bundle so only code reachable from
+      # the entry point is packaged (Requirement 9.1).
+      CodeUri: .
+      Handler: index.handler
+      Runtime: nodejs24.x
+      Environment:
+        Variables:
+          # Wire the stack-owned table's name into the Handler. CounterTable is
+          # named visitor-counter-${Stage}, so this resolves to the same value
+          # (Requirement 11.3).
+          TABLE_NAME: !Ref CounterTable
+          ALLOW_ORIGIN: !Ref AllowOrigin
+          # Local-development-only DynamoDB endpoint override (Requirement 11.7).
+          # Declared here with an empty default so that `sam local --env-vars`
+          # has a template-defined key it can override (SAM's --env-vars only
+          # overrides variables already declared on the function). In every
+          # deployed Stage this stays empty, which the Handler treats as unset,
+          # so the client resolves the real DynamoDB endpoint and deployed
+          # behavior is unchanged.
+          AWS_ENDPOINT_URL_DYNAMODB: ""
+      # Least-privilege IAM: DynamoDBCrudPolicy scoped to only this stack's
+      # table (referenced by name), granting just the DynamoDB actions needed
+      # for reads (GetItem) and atomic increments (UpdateItem) (Requirement 11.4).
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CounterTable
+      Events:
+        GetCount:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /
+            Method: GET
+        PostCount:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: node24
+        Sourcemap: true
+        EntryPoints:
+          - src/index.ts
+# -----------------------------------------------------------------------------
+# Outputs
+# -----------------------------------------------------------------------------
+Outputs:
+  ApiEndpoint:
+    Description: Base URL for the Visitor Counter HTTP API (GET/POST at /).
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+
+  TableName:
+    Description: Name of the stack-owned DynamoDB counter table.
+    Value: !Ref CounterTable
