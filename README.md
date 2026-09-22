@@ -55,6 +55,46 @@ sam deploy --config-env prod   # Stage=prod, AllowOrigin=<explicit origin>
 `prod` must supply an explicit `AllowOrigin` (never `*`) — set the production
 front-end origin in `samconfig.toml` before deploying.
 
+- **Prod later**: edit the `prod` block in `samconfig.toml` — replace
+  `https://your-frontend.example.com` with your real front-end origin (prod
+  rejects `*`), then `sam deploy --config-env prod`.
+- **Teardown** when you're done: `sam delete --stack-name visitor-counter-dev`.
+
+## Smoke-test a deployed stack
+
+After a deploy, CloudFormation prints an `ApiEndpoint` output (also retrievable
+with the command below). The endpoint already includes the stage segment, e.g.
+`https://<api-id>.execute-api.<region>.amazonaws.com/dev`.
+
+```bash
+# Fetch the ApiEndpoint from the deployed stack
+aws cloudformation describe-stacks \
+  --stack-name visitor-counter-dev \
+  --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+  --output text
+```
+
+Then exercise the API:
+
+```bash
+# GET the current count for page "home"
+curl "<ApiEndpoint>/?page=home"
+# -> {"count":0,"updatedAt":null}
+
+# POST to increment it
+curl -X POST "<ApiEndpoint>/?page=home"
+# -> {"count":1,"updatedAt":"2026-01-01T00:00:00.000Z"}
+```
+
+> **Mind the trailing slash.** The routes are `GET /` and `POST /`, so the
+> request path must be `/`. Keep the slash between the stage and the query
+> string: use `.../dev/?page=home` (path `/`, matches) — **not**
+> `.../dev?page=home`, which resolves to an empty path and returns
+> `404 {"message":"Not Found"}`. Also make sure the stage segment (`/dev`) is
+> present; omitting it also yields a 404. When building the URL in code,
+> construct it as `` `${apiEndpoint}/?page=${encodeURIComponent(page)}` `` so
+> the trailing slash is always included.
+
 ## Local development (`sam local start-api`)
 
 > **Dev-only, manual step. Requires Docker. NOT part of CI.**

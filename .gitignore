@@ -44,3 +44,18 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/extensions.json
 !.vscode/launch.json
+
+# --- Kiro ---
+# Commit specs, steering, and hooks so the team shares conventions and plans.
+# Guard against local-only or secret-bearing files that may appear later.
+
+# Local MCP server config often holds endpoints/tokens; keep a shareable
+# example committed instead (.kiro/settings/mcp.json.example).
+.kiro/settings/mcp.json
+
+# Any user/local-scoped Kiro config or cache
+.kiro/**/*.local
+.kiro/**/local/
+
+# Optional: uncomment if per-task metadata churn becomes noisy in diffs.
+# .kiro/specs/**/tasks.meta.json

@@ -1,0 +1,22 @@
+# SAM CLI configuration for the Visitor Counter API.
+# Two deploy environments, each a separate CloudFormation stack in the same
+# AWS account. Invoke with:  sam deploy --config-env dev | prod
+version = 0.1
+
+[dev.deploy.parameters]
+stack_name = "visitor-counter-dev"
+resolve_s3 = true
+region = "ap-southeast-2"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+parameter_overrides = "Stage=dev AllowOrigin=\"*\""
+
+[prod.deploy.parameters]
+stack_name = "visitor-counter-prod"
+resolve_s3 = true
+region = "ap-southeast-2"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+# prod must use an explicit origin, never "*". Replace the placeholder below
+# with your real front-end origin before deploying prod.
+parameter_overrides = "Stage=prod AllowOrigin=\"https://your-frontend.example.com\""
