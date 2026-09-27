@@ -11,7 +11,16 @@
  * 3. Validating a resolved Page_Id against the length and character-set rules
  *    ({@link validatePageId}) and decoding/size-checking/parsing a request
  *    body ({@link parseBody}).
+ *
+ * The Page_Id and JSON-body rules are expressed as Zod schemas. Behavior is
+ * identical to the previous hand-rolled checks: the Page_Id length rule counts
+ * Unicode code points (not UTF-16 units) via a custom refinement rather than
+ * `z.string().max()`, and the body size gate still runs on the raw decoded
+ * bytes before JSON parsing. Each schema failure is mapped back to the fixed
+ * {@link ValidationError} kinds the handler's error table depends on.
  */
+
+import { z } from "zod";
 
 import type { CounterKey, TargetResolution, ValidationError } from "./types";
 
@@ -153,25 +162,93 @@ export const MAX_BODY_BYTES = 8192;
  * @returns A {@link ValidationError} describing the violation, or `null` when
  *   the Page_Id is valid (or the target is the Global_Counter).
  */
+/**
+ * Zod schema encoding the Page_Id validation rules for a non-null Page_Id.
+ *
+ * The three rules are applied in a single {@link z.ZodType.superRefine} so their
+ * evaluation order is guaranteed and each maps to exactly one
+ * {@link ValidationError} `kind`, carried on the issue's `params.kind`:
+ *
+ * 1. Empty string -> `PAGE_ID_EMPTY` (Requirement 7.4).
+ * 2. More than {@link MAX_PAGE_ID_CODE_POINTS} code points, counted via
+ *    `[...value].length` so surrogate pairs count as one -> `PAGE_ID_TOO_LONG`
+ *    (Requirement 7.2). Deliberately NOT `z.string().max()`, which counts
+ *    UTF-16 code units and would miscount astral characters.
+ * 3. Any character outside {@link PERMITTED_PAGE_ID} -> `PAGE_ID_DISALLOWED_CHARS`
+ *    (Requirement 7.3).
+ *
+ * The checks short-circuit on the first failure (via early `return`) so an
+ * over-length value reports the length error rather than also reporting a
+ * character-set error, matching the original ordered `if` chain.
+ */
+const pageIdSchema = z.string().superRefine((value, ctx) => {
+  if (value.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      params: { kind: "PAGE_ID_EMPTY" satisfies ValidationError["kind"] },
+    });
+    return;
+  }
+
+  if ([...value].length > MAX_PAGE_ID_CODE_POINTS) {
+    ctx.addIssue({
+      code: "custom",
+      params: { kind: "PAGE_ID_TOO_LONG" satisfies ValidationError["kind"] },
+    });
+    return;
+  }
+
+  if (!PERMITTED_PAGE_ID.test(value)) {
+    ctx.addIssue({
+      code: "custom",
+      params: {
+        kind: "PAGE_ID_DISALLOWED_CHARS" satisfies ValidationError["kind"],
+      },
+    });
+  }
+});
+
 export function validatePageId(pageId: string | null): ValidationError | null {
   if (pageId === null) {
     return null;
   }
 
-  if (pageId.length === 0) {
-    return { kind: "PAGE_ID_EMPTY" };
+  const result = pageIdSchema.safeParse(pageId);
+  if (result.success) {
+    return null;
   }
 
-  if ([...pageId].length > MAX_PAGE_ID_CODE_POINTS) {
-    return { kind: "PAGE_ID_TOO_LONG" };
-  }
-
-  if (!PERMITTED_PAGE_ID.test(pageId)) {
-    return { kind: "PAGE_ID_DISALLOWED_CHARS" };
-  }
-
-  return null;
+  // The schema emits exactly one custom issue carrying `params.kind` (the
+  // matching ValidationError kind). `params` is present only on custom issues,
+  // so it is not part of the base issue union type; narrow to read it. The
+  // first issue is the earliest rule that failed.
+  const issue = result.error.issues[0] as
+    | { params?: { kind?: ValidationError["kind"] } }
+    | undefined;
+  const kind = issue?.params?.kind;
+  return kind ? { kind } : { kind: "PAGE_ID_DISALLOWED_CHARS" };
 }
+
+/**
+ * Zod schema that parses a decoded body string into a JSON value.
+ *
+ * `transform` performs the parse inside a guarded block; on `JSON.parse`
+ * failure it flags a custom issue so `safeParse` reports failure, which
+ * {@link parseBody} maps to `INVALID_JSON` (Requirement 7.1). The parsed value
+ * is intentionally typed as `unknown`: downstream target resolution inspects it
+ * structurally rather than relying on a fixed shape, so no further schema is
+ * imposed here. The decode and {@link MAX_BODY_BYTES} size gate run in
+ * {@link parseBody} before this schema, because they concern the raw wire body
+ * (base64/byte length) rather than the parsed JSON value.
+ */
+const jsonBodySchema = z.string().transform((text, ctx): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    ctx.addIssue({ code: "custom", message: "Invalid JSON" });
+    return z.NEVER;
+  }
+});
 
 /**
  * Decode and parse a request body into a JSON value.
@@ -215,9 +292,9 @@ export function parseBody(
     return { error: { kind: "BODY_TOO_LARGE" } };
   }
 
-  try {
-    return { parsed: JSON.parse(decoded) };
-  } catch {
+  const jsonResult = jsonBodySchema.safeParse(decoded);
+  if (!jsonResult.success) {
     return { error: { kind: "INVALID_JSON" } };
   }
+  return { parsed: jsonResult.data };
 }
