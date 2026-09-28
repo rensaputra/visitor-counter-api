@@ -8,7 +8,8 @@
   "scripts": {
     "test": "jest",
     "test:coverage": "jest --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "openapi": "node scripts/generate-openapi.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1137.0",
@@ -16,6 +17,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "9.1.0",
     "@types/aws-lambda": "8.10.163",
     "@types/jest": "30.0.0",
     "@types/node": "24.9.2",

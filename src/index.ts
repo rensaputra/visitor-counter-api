@@ -30,6 +30,7 @@ import {
 } from "./input";
 import { readCount, incrementCount } from "./counter";
 import type {
+  CounterKey,
   CounterResponseBody,
   CounterResult,
   ValidationError,
@@ -138,9 +139,7 @@ function resolveAndValidateKey(
   event: APIGatewayProxyEventV2,
   parsedBody: unknown,
   allowOrigin: string
-):
-  | { key: ReturnType<typeof deriveCounterKey> }
-  | { response: APIGatewayProxyStructuredResultV2 } {
+): { key: CounterKey } | { response: APIGatewayProxyStructuredResultV2 } {
   // API Gateway v2 types query values as `string | undefined`; `resolveTarget`
   // (via its `nonEmptyString` guard) already tolerates missing/undefined values,
   // so narrow the map to the expected shape at this boundary.
