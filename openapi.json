@@ -1,0 +1,227 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Visitor Counter API",
+    "version": "1.0.0",
+    "description": "Serverless visitor counter. GET reads a count; POST atomically increments and returns it. Counters are selected by page or default to a global counter.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{apiId}.execute-api.{region}.amazonaws.com/{stage}",
+      "description": "Deployed HTTP API stage",
+      "variables": {
+        "apiId": {
+          "default": "your-api-id"
+        },
+        "region": {
+          "default": "ap-southeast-2"
+        },
+        "stage": {
+          "default": "dev"
+        }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "CounterRequest": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9\\-_.\\/]+$",
+            "description": "Page identifier to operate on. Ignored when a non-empty `page` query parameter is present. Omit to target the global counter.",
+            "example": "blog/hello-world"
+          }
+        }
+      },
+      "CounterResponse": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Current visit count for the targeted counter.",
+            "example": 42
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of the last increment, or null if the counter has never been incremented.",
+            "example": "2026-09-28T12:34:56.000Z"
+          }
+        },
+        "required": [
+          "count",
+          "updatedAt"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable description of the failure.",
+            "example": "pageId contains disallowed characters"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "readCount",
+        "security": [],
+        "summary": "Read the current visit count",
+        "description": "Returns the current count for the counter selected by the `page` query parameter, or the global counter when `page` is omitted. Does not modify any counter.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9\\-_.\\/]+$",
+              "description": "Page identifier. Allowed characters: ASCII letters, digits, '-', '_', '.', '/'. Maximum length is 128 Unicode code points (the server counts code points, not UTF-16 units).",
+              "example": "blog/hello-world"
+            },
+            "required": false,
+            "description": "Selects the counter to operate on. Takes precedence over the request body `pageId`. Omit (or leave empty) to target the global counter.",
+            "name": "page",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current visit count for the targeted counter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CounterResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (bad JSON, oversized body, or invalid pageId).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "HTTP method not supported for this resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The request could not be processed server-side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "incrementCount",
+        "security": [],
+        "summary": "Increment and read the visit count",
+        "description": "Atomically increments the counter selected by the `page` query parameter or the request body `pageId` (query wins), or the global counter when neither is supplied, and returns the new count. The decoded request body must not exceed 8192 bytes.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9\\-_.\\/]+$",
+              "description": "Page identifier. Allowed characters: ASCII letters, digits, '-', '_', '.', '/'. Maximum length is 128 Unicode code points (the server counts code points, not UTF-16 units).",
+              "example": "blog/hello-world"
+            },
+            "required": false,
+            "description": "Selects the counter to operate on. Takes precedence over the request body `pageId`. Omit (or leave empty) to target the global counter.",
+            "name": "page",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CounterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current visit count for the targeted counter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CounterResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (bad JSON, oversized body, or invalid pageId).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "HTTP method not supported for this resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The request could not be processed server-side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

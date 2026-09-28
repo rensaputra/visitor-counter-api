@@ -27,6 +27,56 @@ npm run test:coverage   # run with coverage (enforces the gate)
 npm run typecheck   # type-check without emitting
 ```
 
+## API contract (OpenAPI)
+
+The published contract lives in [`openapi.json`](openapi.json) (OpenAPI 3.1) and
+is **generated**, not hand-written. It is committed so consumers can pick up the
+contract without running the build.
+
+```bash
+npm run openapi     # regenerate openapi.json from the Zod schemas
+```
+
+### How generation works
+
+The contract is derived from Zod schemas so it cannot silently drift from the
+code's real rules:
+
+- `src/input.ts` holds the runtime **validation** schemas (the `pageId` rules
+  and body parsing). These are the source of truth for the constraint values
+  (`MAX_PAGE_ID_CODE_POINTS`, `PERMITTED_PAGE_ID`, `MAX_BODY_BYTES`).
+- `src/openapi.ts` holds the **contract** schemas — the request/response body
+  and parameter shapes the API exposes — annotated with `.openapi()` metadata
+  via [`@asteasolutions/zod-to-openapi`](https://github.com/asteasolutions/zod-to-openapi).
+  These reuse the constants from `src/input.ts`, so the documented constraints
+  stay tied to the enforced ones.
+- `scripts/generate-openapi.mjs` registers the `GET /` and `POST /` paths
+  against those schemas and writes `openapi.json`.
+
+Contract schemas are kept separate from validation schemas on purpose: the
+validation layer validates a bare `pageId` string and a raw JSON body, whereas
+the contract describes the full HTTP request/response bodies. They agree by
+sharing the same constants, not by being the same objects.
+
+> **Note on `maxLength`.** The spec sets `maxLength: 128` on `pageId`, but
+> OpenAPI/JSON Schema `maxLength` counts UTF-16 code units while the server
+> enforces the limit in Unicode **code points**. The field description records
+> this so consumers understand the exact rule.
+
+The generator uses the project's existing esbuild dependency to bundle
+`src/openapi.ts` (TypeScript) into a short-lived module it can import — no extra
+TS loader is required. The temporary bundle directory (`.openapi-tmp-*/`) is
+created in the project root so it resolves the project's `node_modules`, and is
+removed automatically after each run.
+
+### Validate the spec
+
+`openapi.json` validates cleanly under the Redocly recommended ruleset:
+
+```bash
+npx @redocly/cli lint openapi.json
+```
+
 ## Validate and build (SAM)
 
 `sam build` uses the esbuild BuildMethod to bundle the Handler and all runtime
