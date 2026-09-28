@@ -96,6 +96,7 @@ async function main() {
     method: "get",
     path: "/",
     operationId: "readCount",
+    tags: ["Visitor Counter"],
     // Public endpoint: no authentication. Declared explicitly so the contract
     // states "no auth" rather than leaving it unspecified.
     security: [],
@@ -114,6 +115,7 @@ async function main() {
     method: "post",
     path: "/",
     operationId: "incrementCount",
+    tags: ["Visitor Counter"],
     // Public endpoint: no authentication. See note on the GET operation.
     security: [],
     summary: "Increment and read the visit count",
@@ -146,6 +148,12 @@ async function main() {
         "to a global counter.",
       license: { name: "MIT", identifier: "MIT" },
     },
+    tags: [
+      {
+        name: "Visitor Counter",
+        description: "Operations for reading and incrementing the visit count",
+      },
+    ],
     servers: [
       {
         url: "https://{apiId}.execute-api.{region}.amazonaws.com/{stage}",

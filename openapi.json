@@ -9,6 +9,12 @@
       "identifier": "MIT"
     }
   },
+  "tags": [
+    {
+      "name": "Visitor Counter",
+      "description": "Operations for reading and incrementing the visit count"
+    }
+  ],
   "servers": [
     {
       "url": "https://{apiId}.execute-api.{region}.amazonaws.com/{stage}",
@@ -85,6 +91,9 @@
     "/": {
       "get": {
         "operationId": "readCount",
+        "tags": [
+          "Visitor Counter"
+        ],
         "security": [],
         "summary": "Read the current visit count",
         "description": "Returns the current count for the counter selected by the `page` query parameter, or the global counter when `page` is omitted. Does not modify any counter.",
@@ -149,6 +158,9 @@
       },
       "post": {
         "operationId": "incrementCount",
+        "tags": [
+          "Visitor Counter"
+        ],
         "security": [],
         "summary": "Increment and read the visit count",
         "description": "Atomically increments the counter selected by the `page` query parameter or the request body `pageId` (query wins), or the global counter when neither is supplied, and returns the new count. The decoded request body must not exceed 8192 bytes.",
