@@ -5,7 +5,17 @@ module.exports = {
   roots: ["<rootDir>/src"],
   testMatch: ["**/*.test.ts"],
   collectCoverage: false,
-  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.test.ts", "!src/types.ts"],
+  collectCoverageFrom: [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    // Type-only module: no runtime logic to cover.
+    "!src/types.ts",
+    // Build-time OpenAPI contract schemas. This module has no runtime side
+    // effects and is not part of the Lambda bundle; it is consumed only by the
+    // `npm run openapi` generation script, so it is excluded from runtime
+    // coverage the same way types.ts is.
+    "!src/openapi.ts",
+  ],
   coverageThreshold: {
     global: {
       statements: 95,

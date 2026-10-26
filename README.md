@@ -145,6 +145,52 @@ curl -X POST "<ApiEndpoint>/?page=home"
 > construct it as `` `${apiEndpoint}/?page=${encodeURIComponent(page)}` `` so
 > the trailing slash is always included.
 
+## CI/CD (GitHub Actions)
+
+The pipeline in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
+runs the quality gate on every pull request and, on pushes to `main`, deploys
+to dev, smoke-tests the live dev API, and then promotes to prod behind a manual
+approval gate.
+
+```
+PR / push to main ──▶ quality gate
+                        │  (typecheck, jest coverage, sam validate, sam build)
+push to main ───────────┼─▶ deploy-dev ──▶ smoke-dev ──▶ deploy-prod
+                                (dev role)   (live API)    (prod role,
+                                                            manual approval)
+```
+
+### Jobs
+
+- **quality** — runs on PRs and pushes to `main`. Checks out, sets up Node 24
+  with npm cache, `npm ci`, `npm run typecheck`, `npx jest --coverage` (enforces
+  the ≥95% statements / ≥90% branches gate), then sets up the SAM CLI and runs
+  `sam validate --lint` and `sam build`. Needs no AWS access.
+- **deploy-dev** — pushes to `main` only, after `quality`. Assumes the dev IAM
+  role via OIDC and runs
+  `sam deploy --config-env dev --no-confirm-changeset --no-fail-on-empty-changeset`,
+  then reads the stack's `ApiEndpoint` output for the next job.
+- **smoke-dev** — runs `scripts/smoke-test.mjs` against the live dev endpoint.
+  A failure here stops the pipeline before prod.
+- **deploy-prod** — gated by the GitHub `production` Environment's required
+  reviewers. On approval, assumes the prod IAM role via OIDC and deploys
+  `--config-env prod`.
+
+### Authentication (OIDC, no stored keys)
+
+CI authenticates to AWS with short-lived GitHub OIDC tokens — there are no
+long-lived AWS access keys in the repo. The dev role's trust is scoped to the
+`main` branch; the prod role's trust is scoped to the `production` environment,
+so prod can only deploy after a reviewer approves. The one-time AWS setup (OIDC
+provider, two IAM roles, and their policies) is documented in
+[`cicd/OIDC-SETUP.md`](cicd/OIDC-SETUP.md). The workflow reads the role ARNs
+from the `AWS_DEPLOY_ROLE_DEV` and `AWS_DEPLOY_ROLE_PROD` repository secrets.
+
+Deploys run non-interactively (`--no-confirm-changeset`), while the local
+`samconfig.toml` keeps `confirm_changeset = true` so manual deploys still prompt.
+Rollout safety for prod is handled by the CodeDeploy linear traffic shift and
+CloudWatch alarm already defined in `template.yaml`.
+
 ## Local development (`sam local start-api`)
 
 > **Dev-only, manual step. Requires Docker. NOT part of CI.**
