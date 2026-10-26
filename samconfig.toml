@@ -17,6 +17,4 @@ resolve_s3 = true
 region = "ap-southeast-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
-# prod must use an explicit origin, never "*". Replace the placeholder below
-# with your real front-end origin before deploying prod.
-parameter_overrides = "Stage=prod AllowOrigin=\"https://your-frontend.example.com\""
+parameter_overrides = "Stage=prod AllowOrigin=\"https://res.id.au\""
