@@ -70,6 +70,7 @@ jobs:
     needs: quality
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: dev
     permissions:
       contents: read
       id-token: write # required to mint the OIDC token for AWS
@@ -156,7 +157,7 @@ jobs:
     name: Deploy (prod)
     needs: smoke-dev
     runs-on: ubuntu-latest
-    environment: production
+    environment: prod
     permissions:
       contents: read
       id-token: write # required to mint the OIDC token for AWS
