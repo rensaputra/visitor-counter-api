@@ -5,7 +5,11 @@ version = 0.1
 
 [dev.deploy.parameters]
 stack_name = "visitor-counter-dev"
-resolve_s3 = true
+# Pin to the pre-provisioned SAM managed artifact bucket instead of resolve_s3.
+# resolve_s3 runs a CreateChangeSet against the aws-sam-cli-managed-default
+# stack on every deploy, which the scoped CI role (visitor-counter-* only) is
+# not permitted to touch. The bucket is bootstrapped once by an admin.
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-xd4zuudla0yr"
 region = "ap-southeast-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
@@ -13,7 +17,9 @@ parameter_overrides = "Stage=dev AllowOrigin=\"*\""
 
 [prod.deploy.parameters]
 stack_name = "visitor-counter-prod"
-resolve_s3 = true
+# See the dev note above: pin the managed bucket instead of resolve_s3 so the
+# scoped CI role never needs CloudFormation access to aws-sam-cli-managed-default.
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-xd4zuudla0yr"
 region = "ap-southeast-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
