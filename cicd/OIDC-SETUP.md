@@ -271,7 +271,10 @@ Save as `deploy-policy.json`:
         "apigateway:PATCH",
         "apigateway:DELETE"
       ],
-      "Resource": "arn:aws:apigateway:ap-southeast-2::*"
+      "Resource": [
+        "arn:aws:apigateway:ap-southeast-2::*",
+        "arn:aws:apigateway:ap-southeast-2:AWS_ACCOUNT_ID:*"
+      ]
     },
     {
       "Sid": "DynamoDbTable",
@@ -352,6 +355,16 @@ done
 > first time a managed bucket is created. If a first deploy fails on an
 > `AccessDenied` for an unexpected action, add that specific action rather than
 > broadening to `"*"`. Capture the exact error from the CloudFormation events.
+>
+> **API Gateway tagging needs both ARN forms.** API Gateway has no
+> `apigateway:TagResource` IAM action — tagging is authorized through the HTTP
+> verbs (`apigateway:PUT`/`POST`). But the ApiGatewayV2 handler evaluates the
+> stage-tagging call against the _account-qualified_ ARN
+> (`arn:aws:apigateway:<region>:<account>:*`), while most other API Gateway
+> calls use the empty-account form (`arn:aws:apigateway:<region>::*`). The
+> `ApiGatewayHttpApi` statement must list **both** forms, or stage creation
+> fails with a misleading `AccessDenied ... apigateway:TagResource` 403. Note
+> this is a resource-scope fix, not a missing action.
 >
 > **SAM managed bucket — bootstrap once, don't let CI touch it.** With
 > `resolve_s3 = true`, SAM runs a `CreateChangeSet` against the
