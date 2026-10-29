@@ -31,6 +31,23 @@ export GITHUB_REPO="visitor-counter-api"
 export AWS_REGION="ap-southeast-2"
 ```
 
+> **Important — immutable subject claims.** Since 15 July 2026, GitHub issues
+> OIDC tokens with an _immutable_ `sub` claim that embeds numeric owner and
+> repository IDs instead of the plain `owner/repo` name, e.g.
+> `repo:rensaputra@1814138/visitor-counter-api@1374245399:ref:refs/heads/main`.
+> This repo uses that format, and once immutable subjects are enabled the
+> setting cannot be turned off. The trust policies below are written against the
+> immutable `sub`. Look up your own IDs before copying them:
+>
+> ```bash
+> # The sub_claim_prefix field is the immutable "repo:OWNER@ID/REPO@ID" string.
+> gh api repos/$GITHUB_ORG/$GITHUB_REPO/actions/oidc/customization/sub
+> ```
+>
+> Append `:ref:refs/heads/main` (dev) or `:environment:production` (prod) to that
+> prefix. If your repo predates the change and still issues name-based subjects,
+> use `repo:$GITHUB_ORG/$GITHUB_REPO:...` instead.
+
 ---
 
 ## 1. Create the GitHub OIDC identity provider
@@ -77,7 +94,7 @@ only**. Save as `trust-dev.json`:
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:rensaputra/visitor-counter-api:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:rensaputra@1814138/visitor-counter-api@1374245399:ref:refs/heads/main"
         }
       }
     }
@@ -118,7 +135,7 @@ is what forces manual approval before this role can ever be assumed. Save as
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:rensaputra/visitor-counter-api:environment:production"
+          "token.actions.githubusercontent.com:sub": "repo:rensaputra@1814138/visitor-counter-api@1374245399:environment:production"
         }
       }
     }
@@ -335,6 +352,22 @@ done
 > first time a managed bucket is created. If a first deploy fails on an
 > `AccessDenied` for an unexpected action, add that specific action rather than
 > broadening to `"*"`. Capture the exact error from the CloudFormation events.
+>
+> **SAM managed bucket — bootstrap once, don't let CI touch it.** With
+> `resolve_s3 = true`, SAM runs a `CreateChangeSet` against the
+> `aws-sam-cli-managed-default` CloudFormation stack on _every_ deploy, which
+> the scoped CI role is not allowed to do (it only covers `stack/visitor-counter-*`).
+> Instead, bootstrap the managed bucket once with an admin profile:
+>
+> ```bash
+> sam deploy --guided   # creates aws-sam-cli-managed-default + its S3 bucket
+> ```
+>
+> Then pin that bucket in `samconfig.toml` with `s3_bucket = "<managed-bucket>"`
+> and drop `resolve_s3`, so CI only ever operates on `visitor-counter-*`
+> resources. The deploy policy's `SamManagedBucket` statement already grants
+> object access to `aws-sam-cli-managed-default-*`, so no IAM change is needed.
+> Look up the bucket name with `aws s3 ls | grep aws-sam-cli-managed`.
 
 ---
 
@@ -386,6 +419,25 @@ Push a commit to `main`. The pipeline should:
 If a deploy fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`,
 re-check the trust policy `sub` condition matches exactly: `...:ref:refs/heads/main`
 for dev and `...:environment:production` for prod.
+
+The most common cause is an **immutable subject claim mismatch**. If the trust
+policy uses the plain `repo:OWNER/REPO:...` form but GitHub now issues the
+immutable `repo:OWNER@<ownerId>/REPO@<repoId>:...` form (see the note at the top
+of this file), the `sub` condition silently fails to match. Confirm the exact
+`sub` GitHub issues and fix the trust policy to match it:
+
+```bash
+# Immutable prefix GitHub actually uses for this repo:
+gh api repos/$GITHUB_ORG/$GITHUB_REPO/actions/oidc/customization/sub \
+  --jq .sub_claim_prefix
+
+# Inspect what the role currently trusts:
+aws iam get-role --role-name visitor-counter-deploy-dev \
+  --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'
+```
+
+Note: immutable subjects cannot be disabled once enabled — updating the trust
+policy to the immutable `sub` is the fix, not reverting the GitHub setting.
 
 ## Cleanup (if tearing down)
 
