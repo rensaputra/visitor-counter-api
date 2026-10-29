@@ -269,7 +269,9 @@ Save as `deploy-policy.json`:
         "apigateway:POST",
         "apigateway:PUT",
         "apigateway:PATCH",
-        "apigateway:DELETE"
+        "apigateway:DELETE",
+        "apigateway:TagResource",
+        "apigateway:UntagResource"
       ],
       "Resource": [
         "arn:aws:apigateway:ap-southeast-2::*",
@@ -356,15 +358,16 @@ done
 > `AccessDenied` for an unexpected action, add that specific action rather than
 > broadening to `"*"`. Capture the exact error from the CloudFormation events.
 >
-> **API Gateway tagging needs both ARN forms.** API Gateway has no
-> `apigateway:TagResource` IAM action — tagging is authorized through the HTTP
-> verbs (`apigateway:PUT`/`POST`). But the ApiGatewayV2 handler evaluates the
-> stage-tagging call against the _account-qualified_ ARN
-> (`arn:aws:apigateway:<region>:<account>:*`), while most other API Gateway
-> calls use the empty-account form (`arn:aws:apigateway:<region>::*`). The
-> `ApiGatewayHttpApi` statement must list **both** forms, or stage creation
-> fails with a misleading `AccessDenied ... apigateway:TagResource` 403. Note
-> this is a resource-scope fix, not a missing action.
+> **API Gateway stage creation needs `apigateway:TagResource`.** When SAM/
+> CloudFormation creates the HTTP API stage, the ApiGatewayV2 handler performs
+> a tagging call authorized by the `apigateway:TagResource` action (with
+> `apigateway:UntagResource` needed for teardown). These are real, grantable
+> IAM actions — they are not covered by the HTTP verbs (`GET`/`POST`/`PUT`/
+> `PATCH`/`DELETE`). Without them, stage creation fails with
+> `AccessDenied ... not authorized to perform: apigateway:TagResource`, which
+> rolls back the whole stack. Both ARN forms are kept in `Resource` because the
+> handler may evaluate either the empty-account (`...:ap-southeast-2::*`) or the
+> account-qualified (`...:ap-southeast-2:<account>:*`) form.
 >
 > **SAM managed bucket — bootstrap once, don't let CI touch it.** With
 > `resolve_s3 = true`, SAM runs a `CreateChangeSet` against the
