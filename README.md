@@ -172,7 +172,7 @@ push to main ───────────┼─▶ deploy-dev ──▶ smo
   then reads the stack's `ApiEndpoint` output for the next job.
 - **smoke-dev** — runs `scripts/smoke-test.mjs` against the live dev endpoint.
   A failure here stops the pipeline before prod.
-- **deploy-prod** — gated by the GitHub `production` Environment's required
+- **deploy-prod** — gated by the GitHub `prod` Environment's required
   reviewers. On approval, assumes the prod IAM role via OIDC and deploys
   `--config-env prod`.
 
@@ -180,7 +180,7 @@ push to main ───────────┼─▶ deploy-dev ──▶ smo
 
 CI authenticates to AWS with short-lived GitHub OIDC tokens — there are no
 long-lived AWS access keys in the repo. The dev role's trust is scoped to the
-`main` branch; the prod role's trust is scoped to the `production` environment,
+`dev` environment; the prod role's trust is scoped to the `prod` environment,
 so prod can only deploy after a reviewer approves. The one-time AWS setup (OIDC
 provider, two IAM roles, and their policies) is documented in
 [`cicd/OIDC-SETUP.md`](cicd/OIDC-SETUP.md). The workflow reads the role ARNs

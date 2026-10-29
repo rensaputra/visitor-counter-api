@@ -11,9 +11,9 @@ via short-lived credentials (GitHub OIDC) instead of stored AWS access keys.
 
 1. An IAM **OIDC identity provider** for GitHub's token issuer.
 2. A **dev deploy role** whose trust policy only accepts tokens from this repo
-   on the `main` branch.
+   via the GitHub `dev` **Environment**.
 3. A **prod deploy role** whose trust policy only accepts tokens from this repo
-   via the GitHub `production` **Environment**.
+   via the GitHub `prod` **Environment**.
 
 ## Prerequisites / conventions
 
@@ -34,7 +34,7 @@ export AWS_REGION="ap-southeast-2"
 > **Important — immutable subject claims.** Since 15 July 2026, GitHub issues
 > OIDC tokens with an _immutable_ `sub` claim that embeds numeric owner and
 > repository IDs instead of the plain `owner/repo` name, e.g.
-> `repo:rensaputra@1814138/visitor-counter-api@1374245399:ref:refs/heads/main`.
+> `repo:rensaputra@1814138/visitor-counter-api@1374245399:environment:prod`.
 > This repo uses that format, and once immutable subjects are enabled the
 > setting cannot be turned off. The trust policies below are written against the
 > immutable `sub`. Look up your own IDs before copying them:
@@ -44,7 +44,7 @@ export AWS_REGION="ap-southeast-2"
 > gh api repos/$GITHUB_ORG/$GITHUB_REPO/actions/oidc/customization/sub
 > ```
 >
-> Append `:ref:refs/heads/main` (dev) or `:environment:production` (prod) to that
+> Append `:environment:dev` (dev) or `:environment:prod` (prod) to that
 > prefix. If your repo predates the change and still issues name-based subjects,
 > use `repo:$GITHUB_ORG/$GITHUB_REPO:...` instead.
 
@@ -76,8 +76,8 @@ arn:aws:iam::<AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com
 
 ## 2. Create the dev deploy role
 
-**Trust policy** — accepts OIDC tokens from this repo **on the `main` branch
-only**. Save as `trust-dev.json`:
+**Trust policy** — accepts OIDC tokens from this repo via the `dev`
+**Environment** only. Save as `trust-dev.json`:
 
 ```json
 {
@@ -91,10 +91,8 @@ only**. Save as `trust-dev.json`:
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:rensaputra@1814138/visitor-counter-api@1374245399:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:rensaputra@1814138/visitor-counter-api@1374245399:environment:dev"
         }
       }
     }
@@ -117,7 +115,7 @@ aws iam create-role \
 
 ## 3. Create the prod deploy role
 
-**Trust policy** — accepts OIDC tokens from this repo via the `production`
+**Trust policy** — accepts OIDC tokens from this repo via the `prod`
 **Environment** only. The GitHub Environment's required-reviewers gate (step 5)
 is what forces manual approval before this role can ever be assumed. Save as
 `trust-prod.json`:
@@ -135,7 +133,7 @@ is what forces manual approval before this role can ever be assumed. Save as
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:rensaputra@1814138/visitor-counter-api@1374245399:environment:production"
+          "token.actions.githubusercontent.com:sub": "repo:rensaputra@1814138/visitor-counter-api@1374245399:environment:prod"
         }
       }
     }
@@ -387,12 +385,26 @@ done
 
 ---
 
-## 5. Configure the GitHub `production` Environment
+## 5. Configure the GitHub Environments
 
-The prod role's trust policy only accepts tokens issued for the `production`
-environment, and that environment is where the manual approval lives:
+Each deploy role's trust policy only accepts tokens issued for its matching
+GitHub Environment, so both environments must exist with the names the trust
+policies expect.
 
-1. In the repo: **Settings → Environments → New environment → `production`**.
+### `dev`
+
+1. In the repo: **Settings → Environments → New environment → `dev`**.
+2. (Optional) Restrict deployment branches to `main` — the `deploy-dev` job only
+   runs on pushes to `main` anyway.
+
+No manual approval is configured on `dev`; pushes to `main` deploy there
+automatically.
+
+### `prod`
+
+The `prod` environment is where the manual approval lives:
+
+1. In the repo: **Settings → Environments → New environment → `prod`**.
 2. Under **Deployment protection rules**, enable **Required reviewers** and add
    the people/teams who must approve each prod deploy.
 3. (Optional) Restrict deployment branches to `main`.
@@ -433,8 +445,8 @@ Push a commit to `main`. The pipeline should:
 4. On approval, assume the **prod** role and deploy `visitor-counter-prod`.
 
 If a deploy fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`,
-re-check the trust policy `sub` condition matches exactly: `...:ref:refs/heads/main`
-for dev and `...:environment:production` for prod.
+re-check the trust policy `sub` condition matches exactly: `...:environment:dev`
+for dev and `...:environment:prod` for prod.
 
 The most common cause is an **immutable subject claim mismatch**. If the trust
 policy uses the plain `repo:OWNER/REPO:...` form but GitHub now issues the
