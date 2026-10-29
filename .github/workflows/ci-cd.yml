@@ -1,0 +1,195 @@
+name: CI/CD
+
+# Quality gate on every PR and on pushes to main; deploy + smoke + prod
+# promotion only on pushes to main. Deploys use GitHub OIDC to assume AWS IAM
+# roles (no stored AWS keys). See cicd/OIDC-SETUP.md for the one-time AWS setup.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least-privilege default: jobs that need more (OIDC token minting) opt in
+# per-job below.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-2
+  NODE_VERSION: "24"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Task 2 — Quality gate: typecheck, tests + coverage thresholds, SAM validate
+  # and build. Runs on PRs and on pushes to main. Gates everything downstream.
+  # ---------------------------------------------------------------------------
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test with coverage
+        run: npx jest --coverage
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: SAM validate (lint)
+        run: sam validate --lint
+
+      # esbuild BuildMethod resolves the root node_modules, so deps must be
+      # installed (done above by `npm ci`) before `sam build`.
+      - name: SAM build
+        run: sam build
+
+  # ---------------------------------------------------------------------------
+  # Task 4 — Deploy to dev. Only on pushes to main, after the quality gate.
+  # Assumes the dev OIDC role (trust scoped to main) and captures ApiEndpoint.
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: Deploy (dev)
+    needs: quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required to mint the OIDC token for AWS
+    outputs:
+      api_endpoint: ${{ steps.outputs.outputs.api_endpoint }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # esbuild BuildMethod needs the root node_modules present for `sam build`.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (dev OIDC role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: SAM build
+        run: sam build
+
+      - name: SAM deploy (dev)
+        run: >-
+          sam deploy
+          --config-env dev
+          --no-confirm-changeset
+          --no-fail-on-empty-changeset
+
+      - name: Capture ApiEndpoint output
+        id: outputs
+        run: |
+          endpoint="$(aws cloudformation describe-stacks \
+            --stack-name visitor-counter-dev \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+            --output text)"
+          if [ -z "$endpoint" ] || [ "$endpoint" = "None" ]; then
+            echo "Failed to read ApiEndpoint from stack outputs" >&2
+            exit 1
+          fi
+          echo "api_endpoint=$endpoint" >> "$GITHUB_OUTPUT"
+          echo "Dev ApiEndpoint: $endpoint"
+
+  # ---------------------------------------------------------------------------
+  # Task 5 — Smoke test the live dev API. Gates the prod promotion: a failure
+  # here stops the pipeline before prod.
+  # ---------------------------------------------------------------------------
+  smoke-dev:
+    name: Smoke test (dev)
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run smoke test against dev
+        env:
+          API_ENDPOINT: ${{ needs.deploy-dev.outputs.api_endpoint }}
+        run: node scripts/smoke-test.mjs
+
+  # ---------------------------------------------------------------------------
+  # Task 6 — Deploy to prod, behind the `production` Environment's manual
+  # approval gate (required reviewers configured on the GitHub Environment).
+  # Assumes the prod OIDC role (trust scoped to the production environment).
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy (prod)
+    needs: smoke-dev
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # required to mint the OIDC token for AWS
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (prod OIDC role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: SAM build
+        run: sam build
+
+      - name: SAM deploy (prod)
+        run: >-
+          sam deploy
+          --config-env prod
+          --no-confirm-changeset
+          --no-fail-on-empty-changeset
